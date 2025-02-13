@@ -135,8 +135,10 @@ static lv_point_t _evdev_process_pointer(lv_indev_t * indev, int x, int y)
     int height = lv_display_get_vertical_resolution(disp);
 
     lv_point_t p;
-    p.x = _evdev_calibrate(swapped_x, dsc->min_x, dsc->max_x, offset_x, offset_x + width - 1);
-    p.y = _evdev_calibrate(swapped_y, dsc->min_y, dsc->max_y, offset_y, offset_y + height - 1);
+    p.x = _evdev_calibrate(swapped_x, dsc->min_x, dsc->max_x, offset_y - height, height - 1);
+    p.y = _evdev_calibrate(swapped_y, dsc->min_y, dsc->max_y, offset_x - width, width - 1);
+//  p.x = _evdev_calibrate(swapped_x, dsc->min_x, dsc->max_x, offset_x, offset_x + width - 1);
+//  p.y = _evdev_calibrate(swapped_y, dsc->min_y, dsc->max_y, offset_y, offset_y + height - 1);
     return p;
 }
 
