@@ -604,6 +604,7 @@
             #define LV_USE_DRAW_SW_COMPLEX_GRADIENTS    0
         #endif
     #endif
+
 #endif
 
 /*Use TSi's aka (Think Silicon) NemaGFX */
@@ -775,6 +776,51 @@
             #define LV_USE_PXP_ASSERT CONFIG_LV_USE_PXP_ASSERT
         #else
             #define LV_USE_PXP_ASSERT 0
+        #endif
+    #endif
+#endif
+
+/** Use NXP's G2D on MPU platforms. */
+#ifndef LV_USE_DRAW_G2D
+    #ifdef CONFIG_LV_USE_DRAW_G2D
+        #define LV_USE_DRAW_G2D CONFIG_LV_USE_DRAW_G2D
+    #else
+        #define LV_USE_DRAW_G2D 0
+    #endif
+#endif
+
+#if LV_USE_DRAW_G2D
+    /** Maximum number of buffers that can be stored for G2D draw unit.
+     *  Includes the frame buffers and assets. */
+    #ifndef LV_G2D_HASH_TABLE_SIZE
+        #ifdef CONFIG_LV_G2D_HASH_TABLE_SIZE
+            #define LV_G2D_HASH_TABLE_SIZE CONFIG_LV_G2D_HASH_TABLE_SIZE
+        #else
+            #define LV_G2D_HASH_TABLE_SIZE 50
+        #endif
+    #endif
+
+    #if LV_USE_OS
+        /** Use additional draw thread for G2D processing.*/
+        #ifndef LV_USE_G2D_DRAW_THREAD
+            #ifdef LV_KCONFIG_PRESENT
+                #ifdef CONFIG_LV_USE_G2D_DRAW_THREAD
+                    #define LV_USE_G2D_DRAW_THREAD CONFIG_LV_USE_G2D_DRAW_THREAD
+                #else
+                    #define LV_USE_G2D_DRAW_THREAD 0
+                #endif
+            #else
+                #define LV_USE_G2D_DRAW_THREAD 1
+            #endif
+        #endif
+    #endif
+
+    /** Enable G2D asserts. */
+    #ifndef LV_USE_G2D_ASSERT
+        #ifdef CONFIG_LV_USE_G2D_ASSERT
+            #define LV_USE_G2D_ASSERT CONFIG_LV_USE_G2D_ASSERT
+        #else
+            #define LV_USE_G2D_ASSERT 0
         #endif
     #endif
 #endif
@@ -1265,6 +1311,15 @@
         #define LV_USE_OBJ_ID CONFIG_LV_USE_OBJ_ID
     #else
         #define LV_USE_OBJ_ID           0
+    #endif
+#endif
+
+/**  Enable support widget names*/
+#ifndef LV_USE_OBJ_NAME
+    #ifdef CONFIG_LV_USE_OBJ_NAME
+        #define LV_USE_OBJ_NAME CONFIG_LV_USE_OBJ_NAME
+    #else
+        #define LV_USE_OBJ_NAME         0
     #endif
 #endif
 
@@ -1901,7 +1956,7 @@
 /*==================
  * WIDGETS
  *================*/
-/* Documentation for widgets can be found here: https://docs.lvgl.io/latest/en/html/widgets/index.html . */
+/* Documentation for widgets can be found here: https://docs.lvgl.io/master/details/widgets/index.html . */
 
 /** 1: Causes these widgets to be given default values at creation time.
  *  - lv_buttonmatrix_t:  Get default maps:  {"Btn1", "Btn2", "Btn3", "\n", "Btn4", "Btn5", ""}, else map not set.
@@ -2418,7 +2473,7 @@
 /*==================
  * THEMES
  *==================*/
-/* Documentation for themes can be found here: https://docs.lvgl.io/master/overview/style.html#themes . */
+/* Documentation for themes can be found here: https://docs.lvgl.io/master/details/common-widget-features/styles/style.html#themes . */
 
 /** A simple, impressive and very complete theme */
 #ifndef LV_USE_THEME_DEFAULT
@@ -2494,7 +2549,7 @@
 /*==================
  * LAYOUTS
  *==================*/
-/* Documentation for layouts can be found here: https://docs.lvgl.io/master/layouts/index.html . */
+/* Documentation for layouts can be found here: https://docs.lvgl.io/master/details/common-widget-features/layouts/index.html . */
 
 /** A layout similar to Flexbox in CSS. */
 #ifndef LV_USE_FLEX
@@ -2525,13 +2580,13 @@
 /*====================
  * 3RD PARTS LIBRARIES
  *====================*/
-/* Documentation for libraries can be found here: https://docs.lvgl.io/master/libs/index.html . */
+/* Documentation for libraries can be found here: https://docs.lvgl.io/master/details/libs/index.html . */
 
 /* File system interfaces for common APIs */
 
 /** Setting a default driver letter allows skipping the driver prefix in filepaths.
  *  Documentation about how to use the below driver-identifier letters can be found at
- *  https://docs.lvgl.io/master/details/main-components/fs.html#lv-fs-identifier-letters . */
+ *  https://docs.lvgl.io/master/details/main-modules/fs.html#lv-fs-identifier-letters . */
 #ifndef LV_FS_DEFAULT_DRIVER_LETTER
     #ifdef CONFIG_LV_FS_DEFAULT_DRIVER_LETTER
         #define LV_FS_DEFAULT_DRIVER_LETTER CONFIG_LV_FS_DEFAULT_DRIVER_LETTER
@@ -3049,7 +3104,7 @@
 /*==================
  * OTHERS
  *==================*/
-/* Documentation for several of the below items can be found here: https://docs.lvgl.io/master/others/index.html . */
+/* Documentation for several of the below items can be found here: https://docs.lvgl.io/master/details/auxiliary-modules/index.html . */
 
 /** 1: Enable API to take snapshot for object */
 #ifndef LV_USE_SNAPSHOT
@@ -3504,6 +3559,27 @@
 
 #endif
 
+/** Enable emulated input devices, time emulation, and screenshot compares. */
+#ifndef LV_USE_TEST
+    #ifdef CONFIG_LV_USE_TEST
+        #define LV_USE_TEST CONFIG_LV_USE_TEST
+    #else
+        #define LV_USE_TEST 0
+    #endif
+#endif
+#if LV_USE_TEST
+
+/** Enable `lv_test_screenshot_compare`.
+ * Requires libpng and a few MB of extra RAM. */
+#ifndef LV_USE_TEST_SCREENSHOT_COMPARE
+    #ifdef CONFIG_LV_USE_TEST_SCREENSHOT_COMPARE
+        #define LV_USE_TEST_SCREENSHOT_COMPARE CONFIG_LV_USE_TEST_SCREENSHOT_COMPARE
+    #else
+        #define LV_USE_TEST_SCREENSHOT_COMPARE 0
+    #endif
+#endif
+#endif /*LV_USE_TEST*/
+
 /** Enable loading XML UIs runtime */
 #ifndef LV_USE_XML
     #ifdef CONFIG_LV_USE_XML
@@ -3513,6 +3589,14 @@
     #endif
 #endif
 
+/*1: Enable color filter style*/
+#ifndef LV_USE_COLOR_FILTER
+    #ifdef CONFIG_LV_USE_COLOR_FILTER
+        #define LV_USE_COLOR_FILTER CONFIG_LV_USE_COLOR_FILTER
+    #else
+        #define LV_USE_COLOR_FILTER     0
+    #endif
+#endif
 /*==================
  * DEVICES
  *==================*/
@@ -3727,6 +3811,15 @@
             #define LV_USE_NUTTX_INDEPENDENT_IMAGE_HEAP CONFIG_LV_USE_NUTTX_INDEPENDENT_IMAGE_HEAP
         #else
             #define LV_USE_NUTTX_INDEPENDENT_IMAGE_HEAP 0
+        #endif
+    #endif
+
+    /** Use independent image heap for default draw buffer */
+    #ifndef LV_NUTTX_DEFAULT_DRAW_BUF_USE_INDEPENDENT_IMAGE_HEAP
+        #ifdef CONFIG_LV_NUTTX_DEFAULT_DRAW_BUF_USE_INDEPENDENT_IMAGE_HEAP
+            #define LV_NUTTX_DEFAULT_DRAW_BUF_USE_INDEPENDENT_IMAGE_HEAP CONFIG_LV_NUTTX_DEFAULT_DRAW_BUF_USE_INDEPENDENT_IMAGE_HEAP
+        #else
+            #define LV_NUTTX_DEFAULT_DRAW_BUF_USE_INDEPENDENT_IMAGE_HEAP    0
         #endif
     #endif
 

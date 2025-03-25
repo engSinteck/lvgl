@@ -820,13 +820,20 @@ vg_lite_color_t lv_vg_lite_image_recolor(vg_lite_buffer_t * buffer, const lv_dra
     LV_ASSERT_NULL(buffer);
     LV_ASSERT_NULL(dsc);
 
-    if((buffer->format == VG_LITE_A4 || buffer->format == VG_LITE_A8) || dsc->recolor_opa > LV_OPA_TRANSP) {
-        /* alpha image and image recolor */
+    /* alpha image and image recolor */
+    if(buffer->format == VG_LITE_A4 || buffer->format == VG_LITE_A8) {
+        /*Alpha only image ignore recolor opa*/
         buffer->image_mode = VG_LITE_MULTIPLY_IMAGE_MODE;
-        return lv_vg_lite_color(dsc->recolor, LV_OPA_MIX2(dsc->opa, dsc->recolor_opa), true);
+        return lv_vg_lite_color(dsc->recolor, dsc->opa, true);
     }
-
-    if(dsc->opa < LV_OPA_COVER) {
+    else if(dsc->recolor_opa > LV_OPA_TRANSP) {
+        buffer->image_mode = VG_LITE_MULTIPLY_IMAGE_MODE;
+        /** The 0xff value in a color channel (R/G/B) maintains that channel's maximum intensity,
+         *  effectively preserving its original color contribution when used in blending operations.*/
+        lv_color_t recolor = lv_color_mix(dsc->recolor, lv_color_make(0xff, 0xff, 0xff), dsc->recolor_opa);
+        return lv_vg_lite_color(recolor, dsc->opa, true);
+    }
+    else if(dsc->opa < LV_OPA_COVER) {
         /* normal image opa */
         buffer->image_mode = VG_LITE_MULTIPLY_IMAGE_MODE;
         vg_lite_color_t color;
@@ -850,7 +857,10 @@ bool lv_vg_lite_buffer_open_image(vg_lite_buffer_t * buffer, lv_image_decoder_ds
     args.stride_align = true;
     args.use_indexed = true;
     args.no_cache = no_cache;
-    args.flush_cache = true;
+
+    /** For images output by the GPU itself (such as draw layer),
+     *  there is no need to flush the cache */
+    args.flush_cache = !no_cache;
 
     lv_result_t res = lv_image_decoder_open(decoder_dsc, src, &args);
     if(res != LV_RESULT_OK) {
@@ -1315,6 +1325,16 @@ void lv_vg_lite_flush(struct _lv_draw_vg_lite_unit_t * u)
 #endif
 
     LV_VG_LITE_CHECK_ERROR(vg_lite_flush(), {});
+
+    /* Rremove all old caches reference and swap new caches reference */
+    if(u->grad_pending) {
+        lv_vg_lite_pending_swap(u->grad_pending);
+    }
+
+    lv_vg_lite_pending_swap(u->image_dsc_pending);
+
+    lv_vg_lite_pending_swap(u->bitmap_font_pending);
+
     u->flush_count = 0;
     LV_PROFILER_DRAW_END;
 }
@@ -1333,6 +1353,10 @@ void lv_vg_lite_finish(struct _lv_draw_vg_lite_unit_t * u)
 
     /* Clear image decoder dsc reference */
     lv_vg_lite_pending_remove_all(u->image_dsc_pending);
+
+    /* Clear bitmap font dsc reference */
+    lv_vg_lite_pending_remove_all(u->bitmap_font_pending);
+
     u->flush_count = 0;
     u->letter_count = 0;
     LV_PROFILER_DRAW_END;
