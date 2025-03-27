@@ -46,6 +46,9 @@
 /**********************
  *      TYPEDEFS
  **********************/
+ 
+ extern uint32_t flag_screen_saver;
+ extern void lcd_active_on(void);
 
 typedef struct {
     /*Device*/
@@ -173,6 +176,8 @@ static void _evdev_read(lv_indev_t * indev, lv_indev_data_t * data)
             if(in.code == BTN_MOUSE || in.code == BTN_TOUCH) {
                 if(in.value == 0) dsc->state = LV_INDEV_STATE_RELEASED;
                 else if(in.value == 1) dsc->state = LV_INDEV_STATE_PRESSED;
+				// Screen Saver
+				lcd_active_on();
             }
             else {
                 dsc->key = _evdev_process_key(in.code);
