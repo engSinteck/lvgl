@@ -7,15 +7,15 @@
  *      INCLUDES
  *********************/
 
-#include "../../misc/lv_area_private.h"
 #include "lv_draw_vg_lite.h"
 
 #if LV_USE_DRAW_VG_LITE
 
+#include "lv_draw_vg_lite_type.h"
 #include "lv_vg_lite_utils.h"
 #include "lv_vg_lite_path.h"
-#include "lv_draw_vg_lite_type.h"
 #include "lv_vg_lite_grad.h"
+#include "../../misc/lv_area_private.h"
 
 /*********************
  *      DEFINES
@@ -70,7 +70,7 @@ void lv_draw_vg_lite_triangle(lv_draw_task_t * t, const lv_draw_triangle_dsc_t *
     if(dsc->grad.dir != LV_GRAD_DIR_NONE) {
 #if LV_USE_VECTOR_GRAPHIC
         lv_vg_lite_draw_grad_helper(
-            u,
+            u->grad_ctx,
             &u->target_buffer,
             lv_vg_lite_path_get_path(path),
             &tri_area,

@@ -1,4 +1,4 @@
-#if LV_BUILD_TEST
+#if LV_BUILD_TEST || LV_BUILD_TEST_PERF
 #include "lv_test_init.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +23,7 @@ void lv_test_init(void)
 
     lv_test_display_create(HOR_RES, VER_RES);
     lv_test_indev_create_all();
+    lv_test_fs_init();
 
 #if LV_USE_GESTURE_RECOGNITION
     lv_test_indev_gesture_create();
@@ -40,7 +41,11 @@ void lv_test_init(void)
 
 void lv_test_deinit(void)
 {
-    lv_mem_deinit();
+#if LV_USE_GESTURE_RECOGNITION
+    lv_test_indev_gesture_delete();
+#endif
+    lv_test_indev_delete_all();
+    lv_deinit();
 }
 
 static void test_log_print_cb(lv_log_level_t level, const char * buf)
@@ -49,7 +54,7 @@ static void test_log_print_cb(lv_log_level_t level, const char * buf)
         return;
     }
 
-    TEST_PRINTF("%s", buf);
+    TEST_PRINTF(buf);
 }
 
 void lv_test_assert_fail(void)

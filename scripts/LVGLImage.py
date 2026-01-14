@@ -26,6 +26,8 @@ def uint8_t(val) -> bytes:
 def uint16_t(val) -> bytes:
     return val.to_bytes(2, byteorder='little')
 
+def swap_uint16_t(val) -> bytes:
+    return val.to_bytes(2, byteorder='big')
 
 def uint24_t(val) -> bytes:
     return val.to_bytes(3, byteorder='little')
@@ -115,12 +117,15 @@ class ColorFormat(Enum):
     A2 = 0x0C
     A4 = 0x0D
     A8 = 0x0E
+    AL88 = 0x15
     ARGB8888 = 0x10
     XRGB8888 = 0x11
     RGB565 = 0x12
+    RGB565_SWAPPED = 0x1B
     ARGB8565 = 0x13
     RGB565A8 = 0x14
     RGB888 = 0x0F
+    ARGB8888_PREMULTIPLIED = 0x1A
 
     @property
     def bpp(self) -> int:
@@ -137,12 +142,15 @@ class ColorFormat(Enum):
             ColorFormat.A2: 2,
             ColorFormat.A4: 4,
             ColorFormat.A8: 8,
+            ColorFormat.AL88: 16,
             ColorFormat.ARGB8888: 32,
             ColorFormat.XRGB8888: 32,
             ColorFormat.RGB565: 16,
+            ColorFormat.RGB565_SWAPPED: 16,
             ColorFormat.RGB565A8: 16,  # 16bpp + a8 map
             ColorFormat.ARGB8565: 24,
             ColorFormat.RGB888: 24,
+            ColorFormat.ARGB8888_PREMULTIPLIED: 32,
         }
 
         return cf_map[self] if self in cf_map else 0
@@ -176,16 +184,20 @@ class ColorFormat(Enum):
     @property
     def has_alpha(self) -> bool:
         return self.is_alpha_only or self.is_indexed or self in (
+            ColorFormat.AL88,
             ColorFormat.ARGB8888,
             ColorFormat.XRGB8888,  # const alpha: 0xff
             ColorFormat.ARGB8565,
-            ColorFormat.RGB565A8)
+            ColorFormat.RGB565A8,
+            ColorFormat.ARGB8888_PREMULTIPLIED)
 
     @property
     def is_colormap(self) -> bool:
         return self in (ColorFormat.ARGB8888, ColorFormat.RGB888,
                         ColorFormat.XRGB8888, ColorFormat.RGB565A8,
-                        ColorFormat.ARGB8565, ColorFormat.RGB565)
+                        ColorFormat.ARGB8565, ColorFormat.RGB565,
+                        ColorFormat.RGB565_SWAPPED,
+                        ColorFormat.ARGB8888_PREMULTIPLIED)
 
     @property
     def is_luma_only(self) -> bool:
@@ -251,14 +263,30 @@ def unpack_colors(data: bytes, cf: ColorFormat, w) -> List:
                 if len(ret) % w == 0:
                     break
     elif bpp == 16:
-        #  This is RGB565
-        pixels = [(data[2 * i + 1] << 8) | data[2 * i]
-                  for i in range(len(data) // 2)]
+        if cf == ColorFormat.RGB565:
+            #  This is RGB565
+            pixels = [(data[2 * i + 1] << 8) | data[2 * i]
+                    for i in range(len(data) // 2)]
+            for p in pixels:
+                ret.append(bit_extend((p >> 11) & 0x1f, 5))  # R
+                ret.append(bit_extend((p >> 5) & 0x3f, 6))  # G
+                ret.append(bit_extend((p >> 0) & 0x1f, 5))  # B
+        elif cf == ColorFormat.RGB565_SWAPPED:
+            #  This is RGB565_SWAPPED
+            pixels = [(data[2 * i] << 8) | data[2 * i + 1]
+                    for i in range(len(data) // 2)]
+            for p in pixels:
+                ret.append(bit_extend((p >> 11) & 0x1f, 5))  # R
+                ret.append(bit_extend((p >> 5) & 0x3f, 6))  # G
+                ret.append(bit_extend((p >> 0) & 0x1f, 5))  # B
+        elif cf == ColorFormat.AL88:
+            # AL88: low 8bit = Luminance, high 8bit = Alpha
+            L = data[0::2]  # low byte: luminance
+            A = data[1::2]  # high byte: alpha
+            for luma, alpha in zip(L, A):
+                ret.append(luma)  # L
+                ret.append(alpha)  # A
 
-        for p in pixels:
-            ret.append(bit_extend((p >> 11) & 0x1f, 5))  # R
-            ret.append(bit_extend((p >> 5) & 0x3f, 6))  # G
-            ret.append(bit_extend((p >> 0) & 0x1f, 5))  # B
     elif bpp == 24:
         if cf == ColorFormat.RGB888:
             B = data[0::3]
@@ -295,8 +323,15 @@ def unpack_colors(data: bytes, cf: ColorFormat, w) -> List:
         G = data[1::4]
         R = data[2::4]
         A = data[3::4]
-        for r, g, b, a in zip(R, G, B, A):
-            ret += [r, g, b, a]
+        if cf == ColorFormat.ARGB8888_PREMULTIPLIED:
+            for r, g, b, a in zip(R, G, B, A):
+                r = (r * a // 255)
+                g = (g * a // 255)
+                b = (b * a // 255)
+                ret += [r, g, b, a]
+        else:
+            for r, g, b, a in zip(R, G, B, A):
+                ret += [r, g, b, a]
     else:
         assert 0
 
@@ -324,12 +359,13 @@ def write_c_array_file(
     header = f'''
 #if defined(LV_LVGL_H_INCLUDE_SIMPLE)
 #include "lvgl.h"
+#elif defined(LV_LVGL_H_INCLUDE_SYSTEM)
+#include <lvgl.h>
 #elif defined(LV_BUILD_TEST)
 #include "../lvgl.h"
 #else
 #include "lvgl/lvgl.h"
 #endif
-
 
 #ifndef LV_ATTRIBUTE_MEM_ALIGN
 #define LV_ATTRIBUTE_MEM_ALIGN
@@ -348,13 +384,15 @@ uint8_t {varname}_map[] = {{
 }};
 
 const lv_image_dsc_t {varname} = {{
-  .header.magic = LV_IMAGE_HEADER_MAGIC,
-  .header.cf = LV_COLOR_FORMAT_{cf.name},
-  .header.flags = {flags},
-  .header.w = {w},
-  .header.h = {h},
-  .header.stride = {stride},
-  .header.reserved_2 = 0,
+  .header = {{
+    .magic = LV_IMAGE_HEADER_MAGIC,
+    .cf = LV_COLOR_FORMAT_{cf.name},
+    .flags = {flags},
+    .w = {w},
+    .h = {h},
+    .stride = {stride},
+    .reserved_2 = 0,
+  }},
   .data_size = sizeof({varname}_map),
   .data = {varname}_map,
   .reserved = NULL,
@@ -587,7 +625,9 @@ class LVGLImage:
 
         if self.cf.is_indexed:
 
-            def multiply(r, g, b, a):
+            def multiply(b, g, r, a):
+                # The precision is reduced, the correct way would be to divide by 255,
+                # but this is consistent with the premultiply function in the code.
                 r, g, b = (r * a) >> 8, (g * a) >> 8, (b * a) >> 8
                 return uint8_t(b) + uint8_t(g) + uint8_t(r) + uint8_t(a)
 
@@ -824,6 +864,14 @@ class LVGLImage:
                                  greyscale=True,
                                  alpha=False)
             data = self.data
+        elif self.cf == ColorFormat.AL88:
+            # to grayscale with alpha
+            encoder = png.Writer(self.w,
+                                 self.h,
+                                 bitdepth=8,
+                                 greyscale=True,
+                                 alpha=True)
+            data = unpack_colors(self.data, self.cf, self.w)
         elif self.cf.is_colormap:
             encoder = png.Writer(self.w,
                                  self.h,
@@ -867,6 +915,8 @@ class LVGLImage:
             self._png_to_indexed(cf, filename)
         elif cf.is_alpha_only:
             self._png_to_alpha_only(cf, filename)
+        elif cf == ColorFormat.AL88:
+            self._png_to_al88(cf, filename)
         elif cf.is_luma_only:
             self._png_to_luma_only(cf, filename)
         elif cf.is_colormap:
@@ -963,6 +1013,31 @@ class LVGLImage:
             return 12.92 * y
         return 1.055 * pow(y, 1 / 2.4) - 0.055
 
+    def _png_to_al88(self, cf: ColorFormat, filename: str):
+        reader = png.Reader(str(filename))
+        w, h, rows, info = reader.asRGBA8()
+        if not info['alpha']:
+            raise FormatError(f"{filename} has no alpha channel")
+
+        rawdata = bytearray()
+        for row in rows:
+            R = row[0::4]
+            G = row[1::4]
+            B = row[2::4]
+            A = row[3::4]
+            for r, g, b, a in zip(R, G, B, A):
+                # Calculate luminance using ITU-R BT.709 coefficients
+                r_linear = self.sRGB_to_linear(r / 255.0)
+                g_linear = self.sRGB_to_linear(g / 255.0)
+                b_linear = self.sRGB_to_linear(b / 255.0)
+                luma = 0.2126 * r_linear + 0.7152 * g_linear + 0.0722 * b_linear
+                luma_byte = int(self.linear_to_sRGB(luma) * 255)
+                # AL88: low byte = luminance, high byte = alpha
+                rawdata += uint8_t(luma_byte)  # L
+                rawdata += uint8_t(a)          # A
+
+        self.set_data(ColorFormat.AL88, w, h, rawdata)
+
     def _png_to_luma_only(self, cf: ColorFormat, filename: str):
         reader = png.Reader(str(filename))
         w, h, rows, info = reader.asRGBA8()
@@ -988,6 +1063,16 @@ class LVGLImage:
 
             def pack(r, g, b, a):
                 return uint32_t((a << 24) | (r << 16) | (g << 8) | (b << 0))
+        elif cf == ColorFormat.ARGB8888_PREMULTIPLIED:
+
+            def pack(r, g, b, a):
+                # Premultiply RGB by Alpha
+                r = (r * a // 255)
+                g = (g * a // 255)
+                b = (b * a // 255)
+
+                # Pack into ARGB8888 format
+                return uint32_t((a << 24) | (r << 16) | (g << 8) | (b << 0))
         elif cf == ColorFormat.XRGB8888:
 
             def pack(r, g, b, a):
@@ -1006,6 +1091,14 @@ class LVGLImage:
                 color |= (g >> 2) << 5
                 color |= (b >> 3) << 0
                 return uint16_t(color)
+        elif cf == ColorFormat.RGB565_SWAPPED:
+
+            def pack(r, g, b, a):
+                r, g, b, a = color_pre_multiply(r, g, b, a, self.background)
+                color = (r >> 3) << 11
+                color |= (g >> 2) << 5
+                color |= (b >> 3) << 0
+                return swap_uint16_t(color)
 
         elif cf == ColorFormat.RGB565A8:
 
@@ -1039,13 +1132,13 @@ class LVGLImage:
 
                 if (
                     self.rgb565_dither and
-                    cf in (ColorFormat.RGB565, ColorFormat.RGB565A8, ColorFormat.ARGB8565)
+                    cf in (ColorFormat.RGB565, ColorFormat.RGB565_SWAPPED, ColorFormat.RGB565A8, ColorFormat.ARGB8565)
                 ):
-                    treshold_id = ((y & 7) << 3) + (x & 7)
+                    threshold_id = ((y & 7) << 3) + (x & 7)
 
-                    r = min(r + red_thresh[treshold_id], 0xFF) & 0xF8
-                    g = min(g + green_thresh[treshold_id], 0xFF) & 0xFC
-                    b = min(b + blue_thresh[treshold_id], 0xFF) & 0xF8
+                    r = min(r + red_thresh[threshold_id], 0xFF) & 0xF8
+                    g = min(g + green_thresh[threshold_id], 0xFF) & 0xFC
+                    b = min(b + blue_thresh[threshold_id], 0xFF) & 0xF8
 
                 rawdata += pack(r, g, b, a)
 
@@ -1341,9 +1434,9 @@ def main():
               "choose from I1/2/4/8"),
         default="I8",
         choices=[
-            "L8", "I1", "I2", "I4", "I8", "A1", "A2", "A4", "A8", "ARGB8888",
-            "XRGB8888", "RGB565", "RGB565A8", "ARGB8565", "RGB888", "AUTO",
-            "RAW", "RAW_ALPHA"
+            "L8", "I1", "I2", "I4", "I8", "A1", "A2", "A4", "A8", "AL88", "ARGB8888",
+            "XRGB8888", "RGB565", "RGB565_SWAPPED", "RGB565A8", "ARGB8565", "RGB888", "AUTO",
+            "RAW", "RAW_ALPHA", "ARGB8888_PREMULTIPLIED"
         ])
 
     parser.add_argument('--rgb565dither', action='store_true',

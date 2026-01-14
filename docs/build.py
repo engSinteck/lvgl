@@ -14,6 +14,26 @@ Synopsis
     Build Arguments and Clean Arguments can be used one at a time
     or be freely mixed and combined.
 
+Data Flow
+---------
+
+.. code-block:: text
+
+    Inputs              Generated Source Files             Output
+    -----------         ----------------------       ----------------------
+    ./docs/src/   \
+    ./src/         >===> ./docs/intermediate/  ===>  ./docs/build/<format>/
+    ./examples/   /
+
+    Once ./docs/intermediate/ is built, you can use all the Sphinx output
+    formats, e.g.
+
+    - make html
+    - make latex
+    - make man
+    - make htmlhelp
+    - etc.
+
 Description
 -----------
     Copy source files to an intermediate directory and modify them there before
@@ -197,15 +217,14 @@ cfg_lv_conf_filename = 'lv_conf.h'
 cfg_lv_version_filename = 'lv_version.h'
 cfg_doxyfile_filename = 'Doxyfile'
 cfg_top_index_filename = 'index.rst'
+cfg_default_branch = 'master'
 
 # Filename generated in `latex_output_dir` and copied to `pdf_output_dir`.
 cfg_pdf_filename = 'LVGL.pdf'
 
 
-# -------------------------------------------------------------------------
-# Print usage note.
-# -------------------------------------------------------------------------
 def print_usage_note():
+    """Print usage note."""
     print('Usage:')
     print('  $ python build.py [optional_arg ...]')
     print()
@@ -245,7 +264,7 @@ def cmd(cmd_str, start_dir=None, exit_on_error=True):
 
     if return_code != 0 and exit_on_error:
         announce(__file__, "Exiting build due to previous error.")
-        sys.exit(return_code)
+        sys.exit(1)
 
 
 def intermediate_dir_contents_exists(dir):
@@ -262,9 +281,9 @@ def intermediate_dir_contents_exists(dir):
         c3 = os.path.isdir(temp_path)
         temp_path = os.path.join(dir, '_static')
         c4 = os.path.isdir(temp_path)
-        temp_path = os.path.join(dir, 'details')
+        temp_path = os.path.join(dir, 'debugging')
         c5 = os.path.isdir(temp_path)
-        temp_path = os.path.join(dir, 'intro')
+        temp_path = os.path.join(dir, 'introduction')
         c6 = os.path.isdir(temp_path)
         temp_path = os.path.join(dir, 'contributing')
         c7 = os.path.isdir(temp_path)
@@ -355,7 +374,7 @@ def run(args):
             print(f'Argument [{arg}] not recognized.')
             print()
             print_usage_note()
-            exit(1)
+            exit(2)  # 2 = customary Unix command-line syntax error.
 
     # '-E' option forces Sphinx to rebuild its environment so all docs are
     # fully regenerated, even if not changed.
@@ -451,9 +470,7 @@ def run(args):
         or clean_all or (os.path.isdir(intermediate_dir) and build_intermediate)
 
     if some_cleaning_to_be_done:
-        announce(__file__, "****************")
-        announce(__file__, "Cleaning...")
-        announce(__file__, "****************")
+        announce(__file__, "Cleaning...", box=True)
 
         if clean_intermediate:
             remove_dir(intermediate_dir)
@@ -511,8 +528,8 @@ def run(args):
 
     # If above failed (i.e. `branch` not valid), default to 'master'.
     if status != 0:
-        branch = 'master'
-    elif branch == 'master':
+        branch = cfg_default_branch
+    elif branch == cfg_default_branch:
         # Expected in most cases.  Nothing to change.
         pass
     else:
@@ -521,7 +538,7 @@ def run(args):
             branch = branch[8:]
         else:
             # Default to 'master'.
-            branch = 'master'
+            branch = cfg_default_branch
 
     os.environ['LVGL_URLPATH'] = branch
     os.environ['LVGL_GITCOMMIT'] = branch
@@ -536,9 +553,7 @@ def run(args):
 
     if intermediate_dir_contents_exists(intermediate_dir):
         # We are just doing an update of the intermediate_dir contents.
-        announce(__file__, "****************")
-        announce(__file__, "Updating intermediate directory...")
-        announce(__file__, "****************")
+        announce(__file__, "Updating intermediate directory...", box=True)
 
         exclude_list.append(r'examples.*')
         options = {
@@ -554,9 +569,7 @@ def run(args):
         dirsync.sync(examples_dir, os.path.join(intermediate_dir, cfg_examples_dir), 'sync', **options)
     elif build_intermediate or build_html or build_latex:
         # We are having to create the intermediate_dir contents by copying.
-        announce(__file__, "****************")
-        announce(__file__, "Building intermediate directory...")
-        announce(__file__, "****************")
+        announce(__file__, "Building intermediate directory...", box=True)
 
         t1 = datetime.now()
         copy_method = 1
@@ -597,6 +610,7 @@ def run(args):
         # in individual documents where applicable.
         # -----------------------------------------------------------------
         announce(__file__, "Generating examples...")
+        example_list.make_warnings_into_errors()
         example_list.exec(intermediate_dir)
 
         # -----------------------------------------------------------------
@@ -629,8 +643,18 @@ def run(args):
             api_doc_builder.build_api_docs(lvgl_src_dir,
                                            intermediate_dir,
                                            doxyfile_src_file,
-                                           'details',
-                                           'intro'
+                                           'auxiliary-modules',
+                                           'common-widget-features',
+                                           'contributing',
+                                           'debugging',
+                                           'getting_started',
+                                           'guides',
+                                           'integration',
+                                           'introduction',
+                                           'libs',
+                                           'main-modules',
+                                           'widgets',
+                                           'xml',
                                            )
 
         t2 = datetime.now()
@@ -643,9 +667,7 @@ def run(args):
         announce(__file__, "Skipping Latex build.")
     else:
         t1 = datetime.now()
-        announce(__file__, "****************")
-        announce(__file__, "Building Latex output...")
-        announce(__file__, "****************")
+        announce(__file__, "Building Latex output...", box=True)
 
         # If PDF link is present in top index.rst, remove it so PDF
         # does not have a link to itself.
@@ -661,16 +683,18 @@ def run(args):
         src = intermediate_dir
         dst = output_dir
         cpu = os.cpu_count()
-        # As of 22-Feb-2025, sadly the -D version=xxx is not working as documented.
-        # So the version strings applicable to Latex/PDF/man pages/texinfo
-        # formats are assembled by `conf.py`.
-        cmd_line = f'sphinx-build -M latex "{src}" "{dst}" -j {cpu}'
+
+        # The -D option correctly replaces (overrides) configuration attribute
+        # values in the `conf.py` module.  Since `conf.py` now correctly
+        # computes its own `version` value, we don't have to override it here
+        # with a -D options.  If it should need to be used in the future,
+        # the value after the '=' MUST NOT have quotation marks around it
+        # or it won't work.  Correct usage:  f'-D version={ver}' .
+        cmd_line = f'sphinx-build -M latex "{src}" "{dst}" -j {cpu} --fail-on-warning --keep-going'
         cmd(cmd_line)
 
         # Generate PDF.
-        announce(__file__, "****************")
-        announce(__file__, "Building PDF...")
-        announce(__file__, "****************")
+        announce(__file__, "Building PDF...", box=True)
         cmd_line = 'latexmk -pdf "LVGL.tex"'
         cmd(cmd_line, latex_output_dir, False)
 
@@ -690,9 +714,7 @@ def run(args):
         announce(__file__, "Skipping HTML build.")
     else:
         t1 = datetime.now()
-        announce(__file__, "****************")
-        announce(__file__, "Building HTML output...")
-        announce(__file__, "****************")
+        announce(__file__, "Building HTML output...", box=True)
 
         # If PDF is present in build directory, copy it to
         # intermediate directory for use by HTML build.
@@ -731,13 +753,27 @@ def run(args):
         src = intermediate_dir
         dst = output_dir
         cpu = os.cpu_count()
-        # As of 22-Feb-2025, sadly the -D version=xxx is not working as documented.
-        # So the version strings applicable to Latex/PDF/man pages/texinfo
-        # formats are assembled by `conf.py`.  The -D option in the command
-        # line may go away if it does not, in fact, create some impact on
-        # the doc-gen process.
-        cmd_line = f'sphinx-build -M html "{src}" "{dst}" -D version="{ver}" {env_opt} -j {cpu}'
-        cmd(cmd_line)
+
+        debugging_breathe = 0
+        if debugging_breathe:
+            from sphinx.cmd.build import main as sphinx_build
+            # Don't allow parallel processing while debugging (the '-j' arg is removed).
+            sphinx_args = ['-M', 'html', f'{src}', f'{dst}']
+
+            if len(env_opt) > 0:
+                sphinx_args.append(f'{env_opt}')
+
+            sphinx_build(sphinx_args)
+        else:
+            # The -D option correctly replaces (overrides) configuration attribute
+            # values in the `conf.py` module.  Since `conf.py` now correctly
+            # computes its own `version` value, we don't have to override it here
+            # with a -D options.  If it should need to be used in the future,
+            # the value after the '=' MUST NOT have quotation marks around it
+            # or it won't work.  Correct usage:  f'-D version={ver}' .
+            cmd_line = f'sphinx-build -M html "{src}" "{dst}" -j {cpu} {env_opt} --fail-on-warning --keep-going'
+            cmd(cmd_line)
+
         t2 = datetime.now()
         announce(__file__, 'HTML gen time :  ' + str(t2 - t1))
 

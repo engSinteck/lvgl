@@ -26,6 +26,7 @@ def main():
     arg_parser.add_argument("--dry-run", action="store_true")
     arg_parser.add_argument("--oldest-major", type=int)
     arg_parser.add_argument("--github-token", type=str)
+    arg_parser.add_argument("--skip-master", action="store_true")
 
     args = arg_parser.parse_args()
 
@@ -34,6 +35,7 @@ def main():
     lvgl_path = args.lvgl_path
     dry_run = args.dry_run
     oldest_major = args.oldest_major
+    skip_master = args.skip_master
 
     if not args.github_token and not dry_run:
         print(LOG, "Warning: No github token was provided for this production run. Continuing anyway...")
@@ -78,8 +80,12 @@ def main():
         # 2. update the LVGL submodule to match the LVGL's release branch version
         # 3. update the lv_conf.h based on the lv_conf.defaults
 
+        branches_to_update = lvgl_release_branches
+        if not skip_master:
+            branches_to_update = branches_to_update + [lvgl_default_branch]
+
         # from oldest to newest release...
-        for lvgl_branch in lvgl_release_branches + [lvgl_default_branch]:
+        for lvgl_branch in branches_to_update:
             if isinstance(lvgl_branch, tuple):
                 port_branch = lvgl_branch
                 print(LOG, f"attempting to update release branch {fmt_release(port_branch)} ...")
@@ -145,19 +151,28 @@ def main():
                     if "lvgl.path " in line
                 ), None)
 
+                # check if the submodule is really in the index and not just a leftover in .gitmodules
+                out = subprocess.check_output(("git", "-C", port_clone_tmpdir, "submodule", "status"))
+                if not any(
+                    line.split(maxsplit=1)[1].rsplit(maxsplit=1)[0] == port_lvgl_submodule_path
+                    for line
+                    in out.decode().strip().splitlines()
+                ):
+                    port_lvgl_submodule_path = None
+
             if port_lvgl_submodule_path is None:
                 print(LOG, "this port has no LVGL submodule")
             else:
                 print(LOG, "lvgl submodule found in port at:", port_lvgl_submodule_path)
 
                 # get the SHA of LVGL in this release of LVGL
-                out = subprocess.check_output(("git", "-C", lvgl_path, "rev-parse", "--verify", "--quiet", "HEAD"))
+                out = subprocess.check_output(("git", "-C", lvgl_path, "rev-parse", "--verify", "HEAD"))
                 lvgl_sha = out.decode().strip()
                 print(LOG, "the SHA of LVGL in this release should be:", lvgl_sha)
 
                 # get the SHA of LVGL this port wants to use in this release
                 out = subprocess.check_output(("git", "-C", port_clone_tmpdir, "rev-parse",
-                                               "--verify", "--quiet", f"HEAD:{port_lvgl_submodule_path}"))
+                                               "--verify", f"HEAD:{port_lvgl_submodule_path}"))
                 port_lvgl_submodule_sha = out.decode().strip()
                 print(LOG, "the SHA of LVGL in the submodule of this port is:", port_lvgl_submodule_sha)
 
@@ -204,10 +219,10 @@ def main():
             if port_does_not_have_the_branch or port_submodule_was_updated or port_lv_conf_h_was_updated:
                 print(LOG, "changes were made. ready to push.")
                 # keep it brief for commit message 50 character limit suggestion.
-                # max length will be 50 characters in this case: "CI release edit: new branch. submodule. lv_conf.h."
-                commit_msg = ("CI release edit:"
-                              + (" new branch." if port_does_not_have_the_branch else "")
-                              + (" submodule." if port_submodule_was_updated else "")
+                # max length will be 50 characters in this case: "bot: New branch. Update LVGL submodule. lv_conf.h."
+                commit_msg = ("bot:"
+                              + (" New branch." if port_does_not_have_the_branch else "")
+                              + (" Update LVGL submodule." if port_submodule_was_updated else "")
                               + (" lv_conf.h." if port_lv_conf_h_was_updated else "")
                              )
                 print(LOG, f"commit message: '{commit_msg}'")
@@ -227,7 +242,7 @@ def main():
 
 def get_release_branches(working_dir):
 
-    out = subprocess.check_output(("git", "-C", working_dir, "branch", "--quiet", "--format", "%(refname)", "--all"))
+    out = subprocess.check_output(("git", "-C", working_dir, "branch", "--format", "%(refname)", "--all"))
     branches = out.decode().strip().splitlines()
 
     release_versions = []

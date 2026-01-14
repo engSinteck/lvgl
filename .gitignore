@@ -16,3 +16,8 @@ build/
 .idea
 *.bak
 .vs/
+.config*
+config.h
+defconfig
+env/*
+docs-venv

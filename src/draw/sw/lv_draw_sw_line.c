@@ -151,17 +151,19 @@ static void LV_ATTRIBUTE_FAST_MEM draw_line_hor(lv_draw_task_t * t, const lv_dra
 
             int32_t dash_cnt = dash_start;
             int32_t i;
-            for(i = 0; i < blend_area_w; i++, dash_cnt++) {
-                if(dash_cnt <= dsc->dash_width) {
+            for(i = 0; i < blend_area_w;) {
+                if(dash_cnt < dsc->dash_width) {
                     int16_t diff = dsc->dash_width - dash_cnt;
                     i += diff;
                     dash_cnt += diff;
                 }
-                else if(dash_cnt > dsc->dash_gap + dsc->dash_width) {
-                    dash_cnt = 0;
-                }
                 else {
                     mask_buf[i] = 0x00;
+                    i++;
+                    dash_cnt++;
+                }
+                if(dash_cnt >= dsc->dash_gap + dsc->dash_width) {
+                    dash_cnt = 0;
                 }
 
                 blend_dsc.mask_res = LV_DRAW_SW_MASK_RES_CHANGED;
@@ -399,7 +401,7 @@ static void LV_ATTRIBUTE_FAST_MEM draw_line_skew(lv_draw_task_t * t, const lv_dr
         lv_draw_sw_mask_free_param(&mask_bottom_param);
     }
 #else
-    LV_UNUSED(draw_unit);
+    LV_UNUSED(t);
     LV_UNUSED(dsc);
     LV_LOG_WARN("Can't draw skewed line with LV_DRAW_SW_COMPLEX == 0");
 #endif /*LV_DRAW_SW_COMPLEX*/
