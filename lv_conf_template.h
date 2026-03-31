@@ -1,6 +1,6 @@
 /**
  * @file lv_conf.h
- * Configuration file for v9.5.0-dev
+ * Configuration file for v9.6.0-dev
  */
 
 /*
@@ -119,6 +119,9 @@
      * RTOS task notifications can only be used when there is only one task that can be the recipient of the event.
      */
     #define LV_USE_FREERTOS_TASK_NOTIFY 1
+
+    /* Enable this to provide a custom implementation of lv_os_get_idle_percent. */
+    #define LV_OS_IDLE_PERCENT_CUSTOM 0
 #endif
 
 /*========================
@@ -233,12 +236,29 @@
 #define LV_USE_NEMA_GFX 0
 
 #if LV_USE_NEMA_GFX
+    /** Select which NemaGFX static library headers to use. Possible options:
+     * - LV_NEMA_LIB_NONE           an alias of LV_NEMA_LIB_M33_REVC
+     * - LV_NEMA_LIB_M33_REVC
+     * - LV_NEMA_LIB_M33_NEMAPVG
+     * - LV_NEMA_LIB_M55
+     * - LV_NEMA_LIB_M7
+     * You must also take care to link the correct corresponding static library
+     * in libs/nema_gfx/lib/core/
+     */
+    #define LV_USE_NEMA_LIB LV_NEMA_LIB_NONE
+
     /** Select which NemaGFX HAL to use. Possible options:
      * - LV_NEMA_HAL_CUSTOM
      * - LV_NEMA_HAL_STM32 */
     #define LV_USE_NEMA_HAL LV_NEMA_HAL_CUSTOM
     #if LV_USE_NEMA_HAL == LV_NEMA_HAL_STM32
         #define LV_NEMA_STM32_HAL_INCLUDE <stm32u5xx_hal.h>
+
+        /** Set it to a value like __attribute__((section("Nemagfx_Memory_Pool_Buffer")))
+         * and define the section in the linker script if you need the GPU memory to
+         * be, e.g. in a region where accesses will not be cached.
+         */
+        #define LV_NEMA_STM32_HAL_ATTRIBUTE_POOL_MEM
     #endif
 
     /*Enable Vector Graphics Operations. Available only if NemaVG library is present*/
@@ -275,9 +295,6 @@
 #if LV_USE_G2D
     /** Use G2D for drawing. **/
     #define LV_USE_DRAW_G2D 1
-
-    /** Use G2D to rotate display. **/
-    #define LV_USE_ROTATE_G2D 0
 
     /** Maximum number of buffers that can be stored for G2D draw unit.
      *  Includes the frame buffers and assets. */
@@ -395,7 +412,8 @@
 /** Draw using espressif PPA accelerator */
 #define LV_USE_PPA  0
 #if LV_USE_PPA
-    #define LV_USE_PPA_IMG 0
+    #define LV_USE_PPA_IMG      0
+    #define LV_PPA_BURST_LENGTH    128
 #endif
 
 /* Use EVE FT81X GPU. */
@@ -589,6 +607,9 @@
 
 /** Define a custom attribute for `lv_display_flush_ready` function */
 #define LV_ATTRIBUTE_FLUSH_READY
+
+/** Define a custom attribute for `lv_display_sync_ready` function */
+#define LV_ATTRIBUTE_SYNC_READY
 
 /** Align VG_LITE buffers on this number of bytes.
  *  @note  vglite_src_buf_aligned() uses this value to validate alignment of passed buffer pointers. */
@@ -1238,9 +1259,6 @@
 
 #endif /*LV_USE_TEST*/
 
-/** Enable loading XML UIs runtime */
-#define LV_USE_XML    0
-
 /** 1: Enable text translation support */
 #define LV_USE_TRANSLATION 0
 
@@ -1341,8 +1359,6 @@
      * The GBM library aims to provide a platform independent memory management system
      * it supports the major GPU vendors - This option requires linking with libgbm */
     #define LV_USE_LINUX_DRM_GBM_BUFFERS 0
-
-    #define LV_LINUX_DRM_USE_EGL     0
 #endif
 
 /** Interface for TFT_eSPI */
@@ -1410,7 +1426,9 @@
     #define LV_UEFI_USE_MEMORY_SERVICES 0   /**< Use the memory functions from the boot services table */
 #endif
 
-/** Use a generic OpenGL driver that can be used to embed in other applications or used with GLFW/EGL */
+/** Use a generic OpenGL driver that can be used to embed in other applications or used with GLFW/EGL
+ * - Requires LV_USE_MATRIX.
+ */
 #define LV_USE_OPENGLES   0
 #if LV_USE_OPENGLES
     #define LV_USE_OPENGLES_DEBUG        1    /**< Enable or disable debug for opengles */

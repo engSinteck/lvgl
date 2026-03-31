@@ -83,6 +83,14 @@ void test_textarea_should_scroll_to_the_end(void)
     TEST_ASSERT(lv_textarea_get_one_line(textarea));
 }
 
+void test_textarea_should_not_scroll_if_text_is_fully_visible(void)
+{
+    lv_textarea_set_text(textarea, "Type here...");
+    lv_obj_set_width(textarea, 100);
+    lv_obj_center(textarea);
+    TEST_ASSERT_EQUAL_SCREENSHOT("widgets/textarea_1.png");
+}
+
 void test_textarea_should_update_placeholder_text(void)
 {
     const char * new_placeholder = "LVGL Rocks!!!!!";
@@ -211,11 +219,6 @@ void test_textarea_properties(void)
     TEST_ASSERT_EQUAL_INT(10, lv_textarea_get_max_length(obj));
     TEST_ASSERT_EQUAL_INT(10, lv_obj_get_property(obj, LV_PROPERTY_TEXTAREA_MAX_LENGTH).num);
 
-    prop.id = LV_PROPERTY_TEXTAREA_INSERT_REPLACE;
-    prop.ptr = "abcdef";
-    /*No getter function for this property*/
-    TEST_ASSERT_TRUE(lv_obj_set_property(obj, &prop) == LV_RESULT_OK);
-
     prop.id = LV_PROPERTY_TEXTAREA_TEXT_SELECTION;
     prop.num = true;
     TEST_ASSERT_TRUE(lv_obj_set_property(obj, &prop) == LV_RESULT_OK);
@@ -228,6 +231,87 @@ void test_textarea_properties(void)
     TEST_ASSERT_EQUAL_INT(10, lv_textarea_get_password_show_time(obj));
     TEST_ASSERT_EQUAL_INT(10, lv_obj_get_property(obj, LV_PROPERTY_TEXTAREA_PASSWORD_SHOW_TIME).num);
 #endif
+}
+
+static uint32_t event_count;
+static void event_counter_cb(lv_event_t * e)
+{
+    LV_UNUSED(e);
+    event_count++;
+}
+
+void test_textarea_set_text_should_emit_value_changed_event_only_once(void)
+{
+
+    const char * accepted_list = "abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ!,";
+    const char * text = "Hello, World!";
+    const uint32_t text_len = 13U; /* strlen("Hello, World!") */
+
+    /* Test 1: with accepted_chars set */
+    event_count = 0;
+    lv_textarea_set_accepted_chars(textarea, accepted_list);
+    lv_obj_add_event_cb(textarea, event_counter_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_textarea_set_text(textarea, text);
+
+    TEST_ASSERT_EQUAL_STRING(text, lv_textarea_get_text(textarea));
+    TEST_ASSERT_EQUAL_UINT32(1U, event_count);
+
+    /* Test 2: with max_length set to exactly the text length — if set_text
+     * doesn't clear before re-adding chars, char_is_accepted sees the buffer
+     * as already full and rejects every character, leaving the textarea empty */
+    lv_obj_clean(active_screen);
+    textarea = lv_textarea_create(active_screen);
+
+    event_count = 0;
+    lv_textarea_set_max_length(textarea, text_len);
+    lv_obj_add_event_cb(textarea, event_counter_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_textarea_set_text(textarea, text);
+
+    TEST_ASSERT_EQUAL_STRING(text, lv_textarea_get_text(textarea));
+    TEST_ASSERT_EQUAL_UINT32(1U, event_count);
+
+    /* Test 3: with both accepted_chars and max_length set */
+    lv_obj_clean(active_screen);
+    textarea = lv_textarea_create(active_screen);
+
+    event_count = 0;
+    lv_textarea_set_accepted_chars(textarea, accepted_list);
+    lv_textarea_set_max_length(textarea, text_len);
+    lv_obj_add_event_cb(textarea, event_counter_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_textarea_set_text(textarea, text);
+
+    TEST_ASSERT_EQUAL_STRING(text, lv_textarea_get_text(textarea));
+    TEST_ASSERT_EQUAL_UINT32(1U, event_count);
+
+    /* Test 4: empty string — no characters to add, no event */
+    lv_obj_clean(active_screen);
+    textarea = lv_textarea_create(active_screen);
+
+    event_count = 0;
+    lv_textarea_set_accepted_chars(textarea, accepted_list);
+    lv_textarea_set_max_length(textarea, text_len);
+    lv_obj_add_event_cb(textarea, event_counter_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_textarea_set_text(textarea, "");
+
+    TEST_ASSERT_EQUAL_STRING("", lv_textarea_get_text(textarea));
+    TEST_ASSERT_EQUAL_UINT32(0U, event_count);
+
+    /* Test 5: all characters rejected by accepted_chars — no characters added, no event */
+    lv_obj_clean(active_screen);
+    textarea = lv_textarea_create(active_screen);
+
+    event_count = 0;
+    lv_textarea_set_accepted_chars(textarea, accepted_list);
+    lv_obj_add_event_cb(textarea, event_counter_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_textarea_set_text(textarea, "123"); /* digits not in accepted_list */
+
+    TEST_ASSERT_EQUAL_STRING("", lv_textarea_get_text(textarea));
+    TEST_ASSERT_EQUAL_UINT32(0U, event_count);
 }
 
 #endif

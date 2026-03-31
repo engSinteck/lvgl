@@ -19,7 +19,7 @@ LVGL's GStreamer implementation provides comprehensive media playback capabiliti
 
 **Media Source Support:**
 
-* Local files via file:// URIs
+* Local files via ``file://`` URIs
 * Network streaming with HTTP/HTTPS support
 * RTSP streaming for live video feeds
 * UDP streaming for low-latency applications
@@ -27,10 +27,11 @@ LVGL's GStreamer implementation provides comprehensive media playback capabiliti
 * Video4Linux2 (V4L2) camera devices on Linux
 * Audio capture from ALSA and PulseAudio devices
 * Test sources for audio and video development
+* WebRTC streaming for real-time communication applications
 
 **URI Scheme Support:**
 
-Using the URI factory (``LV_GSTREAMER_FACTORY_URI_DECODE``), you can specify various URI schemes as media sources:
+Using the URI factory (:c:macro:`LV_GSTREAMER_FACTORY_URI_DECODE`), you can specify various URI schemes as media sources:
 
 * **Local files**: ``file://path/to/video.mp4``
 * **Web streams**: ``http://example.com/stream.webm``, ``https://secure.example.com/video.mp4``
@@ -41,6 +42,10 @@ Using the URI factory (``LV_GSTREAMER_FACTORY_URI_DECODE``), you can specify var
 * **Audio devices**: ``alsa://hw:0,0``, ``pulse://default``
 
 GStreamer's ``uridecodebin`` automatically selects the appropriate source element and decoder based on the URI scheme and media format.
+
+.. note::
+
+   WebRTC streaming is supported via a dedicated WebRTC source factory (for example, ``webrtcsrc``) configured with a signalling URI (for example, ``signaller::uri``), and is not provided through :c:macro:`LV_GSTREAMER_FACTORY_URI_DECODE` / ``uridecodebin``.
 
 **Playback Control:**
 
@@ -89,57 +94,57 @@ Setup
 
    **Option 1: Direct linking with LVGL (Recommended)**
 
-.. code-block:: cmake
+   .. code-block:: cmake
 
-    find_package(PkgConfig REQUIRED)
+        find_package(PkgConfig REQUIRED)
 
-    # Find GStreamer packages
-    pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
-    pkg_check_modules(GSTREAMER_VIDEO REQUIRED gstreamer-video-1.0)
-    pkg_check_modules(GSTREAMER_APP REQUIRED gstreamer-app-1.0)
+        # Find GStreamer packages
+        pkg_check_modules(GSTREAMER REQUIRED gstreamer-1.0)
+        pkg_check_modules(GSTREAMER_VIDEO REQUIRED gstreamer-video-1.0)
+        pkg_check_modules(GSTREAMER_APP REQUIRED gstreamer-app-1.0)
 
-    # Link with LVGL
-    target_include_directories(lvgl PUBLIC
-        ${GSTREAMER_INCLUDE_DIRS}
-        ${GSTREAMER_VIDEO_INCLUDE_DIRS}
-        ${GSTREAMER_APP_INCLUDE_DIRS})
-    target_link_libraries(lvgl PUBLIC
-        ${GSTREAMER_LIBRARIES}
-        ${GSTREAMER_VIDEO_LIBRARIES}
-        ${GSTREAMER_APP_LIBRARIES})
+        # Link with LVGL
+        target_include_directories(lvgl PUBLIC
+            ${GSTREAMER_INCLUDE_DIRS}
+            ${GSTREAMER_VIDEO_INCLUDE_DIRS}
+            ${GSTREAMER_APP_INCLUDE_DIRS})
+        target_link_libraries(lvgl PUBLIC
+            ${GSTREAMER_LIBRARIES}
+            ${GSTREAMER_VIDEO_LIBRARIES}
+            ${GSTREAMER_APP_LIBRARIES})
 
 4. **Manual Compilation with pkg-config**
 
    You can also compile manually using pkg-config to query the necessary flags:
 
-.. code-block:: bash
+   .. code-block:: bash
 
-    # Get compilation flags
-    gcc $(pkg-config --cflags --libs gstreamer-1.0 gstreamer-video-1.0 gstreamer-app-1.0) \
-        -o your_app your_app.c lvgl.a
+        # Get compilation flags
+        gcc $(pkg-config --cflags --libs gstreamer-1.0 gstreamer-video-1.0 gstreamer-app-1.0) \
+            -o your_app your_app.c lvgl.a
 
 5. **Basic Setup Example**
 
-.. code-block:: c
+   .. code-block:: c
 
-    int main(void)
-    {
-        /* Initialize LVGL */
-        lv_init();
+        int main(void)
+        {
+            /* Initialize LVGL */
+            lv_init();
 
-        /* Setup display driver */
-        lv_display_t *display = lv_display_create(800, 480);
-        /* ... configure display driver ... */
+            /* Setup display driver */
+            lv_display_t *display = lv_display_create(800, 480);
+            /* ... configure display driver ... */
 
-        /* Create and run your GStreamer application */
-        lv_example_gstreamer_1();
+            /* Create and run your GStreamer application */
+            lv_example_gstreamer_1();
 
-        while (1) {
-            lv_timer_handler();
+            while (1) {
+                lv_timer_handler();
+            }
+
+            return 0;
         }
-
-        return 0;
-    }
 
 Usage
 *****
@@ -167,6 +172,59 @@ Here's how to create a basic GStreamer player and load media:
 
     /* Start playback */
     lv_gstreamer_play(streamer);
+
+
+Events
+------
+
+-  :cpp:enumerator:`LV_EVENT_STATE_CHANGED` Sent when the stream state changes. The stream state can be retrieved via :cpp:expr:`lv_gstreamer_get_stream_state(e)`.
+
+Event Handling
+--------------
+
+Handle GStreamer events using LVGL's event system:
+
+.. code-block:: c
+
+    static void gstreamer_event_cb(lv_event_t * e)
+    {
+
+        lv_event_code_t code = lv_event_get_code(e);
+        lv_obj_t * streamer = lv_event_get_target_obj(e);
+
+        if(code != LV_EVENT_STATE_CHANGED) {
+            return;
+        }
+
+        lv_gstreamer_stream_state_t stream_state = lv_gstreamer_get_stream_state(e);
+        switch(stream_state) {
+            case LV_GSTREAMER_STREAM_STATE_START:
+                LV_LOG_USER("Stream ready - Duration: %" LV_PRIu32 " ms",
+                        lv_gstreamer_get_duration(streamer));
+                LV_LOG_USER("\tStream resolution %" LV_PRId32 "x%" LV_PRId32, lv_image_get_src_width(streamer),
+                        lv_image_get_src_height(streamer));
+                break;
+            case LV_GSTREAMER_STREAM_STATE_END:
+                LV_LOG_USER("Stream is over");
+                break;
+            case LV_GSTREAMER_STREAM_STATE_PLAY:
+                LV_LOG_USER("Stream set to play");
+                break;
+            case LV_GSTREAMER_STREAM_STATE_PAUSE:
+                LV_LOG_USER("Stream set to pause");
+                break;
+            case LV_GSTREAMER_STREAM_STATE_STOP:
+                LV_LOG_USER("Stream set to stop");
+                break;
+        }
+    }
+
+    /* Add event callback */
+    lv_obj_add_event_cb(streamer, gstreamer_event_cb, LV_EVENT_STATE_CHANGED, NULL);
+
+
+
+
 
 Media Source Configuration
 --------------------------
@@ -201,6 +259,15 @@ The GStreamer widget supports various media sources through different factories:
                          LV_GSTREAMER_PROPERTY_FILE,
                          "/path/to/video.mp4");
 
+
+**WebRTC Factory:**
+
+.. code-block:: c
+
+    /* WebRTC stream */
+    lv_gstreamer_set_src(streamer, LV_GSTREAMER_FACTORY_WEBRTCSRC,
+                         LV_GSTREAMER_PROPERTY_WEBRTCSRC,
+                         "ws://signalserver:port/");
 
 Playback Control
 ----------------
@@ -242,29 +309,6 @@ Manage audio volume with built-in controls:
     /* Get current volume */
     uint8_t volume = lv_gstreamer_get_volume(streamer);
 
-Event Handling
---------------
-
-Handle GStreamer events using LVGL's event system:
-
-.. code-block:: c
-
-    static void gstreamer_event_cb(lv_event_t * e)
-    {
-        lv_event_code_t code = lv_event_get_code(e);
-        lv_obj_t * streamer = lv_event_get_target_obj(e);
-
-        if(code == LV_EVENT_READY) {
-                LV_LOG_USER("Stream ready - Duration: %" LV_PRIu32 " ms",
-                           lv_gstreamer_get_duration(streamer));
-                LV_LOG_USER("Resolution: %" LV_PRId32 "x%" LV_PRId32,
-                           lv_image_get_src_width(streamer),
-                           lv_image_get_src_height(streamer));
-        }
-    }
-
-    /* Add event callback */
-    lv_obj_add_event_cb(streamer, gstreamer_event_cb, LV_EVENT_ALL, NULL);
 
 Widget Architecture
 *******************
@@ -280,10 +324,10 @@ State Management
 
 The GStreamer widget maintains these states:
 
-- ``LV_GSTREAMER_STATE_NULL``: Initial state, no media loaded
-- ``LV_GSTREAMER_STATE_READY``: Media loaded and ready to play
-- ``LV_GSTREAMER_STATE_PAUSED``: Playback paused
-- ``LV_GSTREAMER_STATE_PLAYING``: Active playback
+- :cpp:enumerator:`LV_GSTREAMER_STATE_NULL`: Initial state, no media loaded
+- :cpp:enumerator:`LV_GSTREAMER_STATE_READY`: Media loaded and ready to play
+- :cpp:enumerator:`LV_GSTREAMER_STATE_PAUSED`: Playback paused
+- :cpp:enumerator:`LV_GSTREAMER_STATE_PLAYING`: Active playback
 
 Media Information Access
 ------------------------
@@ -295,6 +339,20 @@ Once media is loaded (LV_EVENT_READY), you can access:
 - Current playback position via ``lv_gstreamer_get_position()``
 - Current volume level via ``lv_gstreamer_get_volume()``
 - Current playback state via ``lv_gstreamer_get_state()``
+
+WebRTC Notes
+************
+
+WebRTC is using the Rust plugin "https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs"
+So to be able to stream to an LVGL player application you will need to run a signaller server and then a simpler pipeline like so:
+
+.. code-block:: bash
+
+    ./gst-webrtc-signalling-server &
+    gst-launch-1.0 videotestsrc pattern=ball ! webrtcsink
+
+Then, in your LVGL application, configure WebRTC by passing the signalling server URI (for example, ``ws://localhost:8443``) to ``lv_gstreamer_set_src(..., LV_GSTREAMER_PROPERTY_WEBRTCSRC, ...)``.
+
 
 .. _gstreamer_example:
 

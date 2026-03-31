@@ -7,10 +7,11 @@
  *      INCLUDES
  *********************/
 #include "lv_textarea_private.h"
-#include "../label/lv_label_private.h"
-#include "../../core/lv_obj_class_private.h"
+
 #if LV_USE_TEXTAREA != 0
 
+#include "../label/lv_label_private.h"
+#include "../../core/lv_obj_class_private.h"
 #include "../../core/lv_group.h"
 #include "../../core/lv_refr.h"
 #include "../../indev/lv_indev.h"
@@ -64,7 +65,9 @@ static void auto_hide_characters(lv_obj_t * obj);
 static void auto_hide_characters_cancel(lv_obj_t * obj);
 static inline bool is_valid_but_non_printable_char(const uint32_t letter);
 static void lv_textarea_scroll_to_cusor_pos(lv_obj_t * obj, int32_t pos);
-
+static lv_result_t add_char(lv_obj_t * obj, uint32_t c);
+static void add_text(lv_obj_t * obj, const char * txt);
+static void set_cursor_pos_internal(lv_obj_t * obj, int32_t pos);
 /**********************
  *  STATIC VARIABLES
  **********************/
@@ -114,11 +117,6 @@ static const lv_property_ops_t lv_textarea_properties[] = {
         .id = LV_PROPERTY_TEXTAREA_MAX_LENGTH,
         .setter = lv_textarea_set_max_length,
         .getter = lv_textarea_get_max_length,
-    },
-    {
-        .id = LV_PROPERTY_TEXTAREA_INSERT_REPLACE,
-        .setter = lv_textarea_set_insert_replace,
-        .getter = NULL,
     },
     {
         .id = LV_PROPERTY_TEXTAREA_TEXT_SELECTION,
@@ -187,72 +185,11 @@ lv_obj_t * lv_textarea_create(lv_obj_t * parent)
 void lv_textarea_add_char(lv_obj_t * obj, uint32_t c)
 {
     LV_ASSERT_OBJ(obj, MY_CLASS);
-
-    lv_textarea_t * ta = (lv_textarea_t *)obj;
-
-    if(ta->one_line && (c == '\n' || c == '\r')) {
-        LV_LOG_INFO("Text area: line break ignored in one-line mode");
+    lv_result_t res = add_char(obj, c);
+    if(res != LV_RESULT_OK) {
         return;
     }
-
-    uint32_t u32_buf[2];
-    u32_buf[0] = c;
-    u32_buf[1] = 0;
-
-    const char * letter_buf = (char *)&u32_buf;
-
-    uint32_t c2 = c;
-#if LV_BIG_ENDIAN_SYSTEM
-    if(c != 0) while(*letter_buf == 0) ++letter_buf;
-
-    /*The byte order may or may not need to be swapped here to get correct c_uni below,
-      since lv_textarea_add_text is ordering bytes correctly before calling lv_textarea_add_char.
-      Assume swapping is needed if MSB is zero. May not be foolproof. */
-    if((c != 0) && ((c & 0xff000000) == 0)) {
-        c2 = ((c >> 24) & 0xff) | /*move byte 3 to byte 0*/
-             ((c << 8) & 0xff0000) | /*move byte 1 to byte 2*/
-             ((c >> 8) & 0xff00) | /*move byte 2 to byte 1*/
-             ((c << 24) & 0xff000000); /*byte 0 to byte 3*/
-    }
-#endif
-
-    lv_result_t res = insert_handler(obj, letter_buf);
-    if(res != LV_RESULT_OK) return;
-
-    uint32_t c_uni = lv_text_encoded_next((const char *)&c2, NULL);
-
-    if(char_is_accepted(obj, c_uni) == false) {
-        LV_LOG_INFO("Character is not accepted by the text area (too long text or not in the accepted list)");
-        return;
-    }
-
-    if(ta->pwd_mode) pwd_char_hider(obj); /*Make sure all the current text contains only '*'*/
-
-    /*If the textarea is empty, invalidate it to hide the placeholder*/
-    if(ta->placeholder_txt) {
-        const char * txt = lv_label_get_text(ta->label);
-        if(txt[0] == '\0') lv_obj_invalidate(obj);
-    }
-
-    lv_label_ins_text(ta->label, ta->cursor.pos, letter_buf); /*Insert the character*/
-    lv_textarea_clear_selection(obj); /*Clear selection*/
-
-    if(ta->pwd_mode) {
-        /*+2: the new char + \0*/
-        size_t realloc_size = lv_strlen(ta->pwd_tmp) + lv_strlen(letter_buf) + 1;
-        ta->pwd_tmp = lv_realloc(ta->pwd_tmp, realloc_size);
-        LV_ASSERT_MALLOC(ta->pwd_tmp);
-        if(ta->pwd_tmp == NULL) return;
-
-        lv_text_ins(ta->pwd_tmp, ta->cursor.pos, (const char *)letter_buf);
-
-        /*Auto hide characters*/
-        auto_hide_characters(obj);
-    }
-
-    /*Move the cursor after the new character*/
     lv_textarea_set_cursor_pos(obj, lv_textarea_get_cursor_pos(obj) + 1);
-
     lv_obj_send_event(obj, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
@@ -267,11 +204,7 @@ void lv_textarea_add_text(lv_obj_t * obj, const char * txt)
 
     /*Add the character one-by-one if not all characters are accepted or there is character limit.*/
     if(lv_textarea_get_accepted_chars(obj) || lv_textarea_get_max_length(obj)) {
-        uint32_t i = 0;
-        while(txt[i] != '\0') {
-            uint32_t c = lv_text_encoded_next(txt, &i);
-            lv_textarea_add_char(obj, lv_text_unicode_to_encoded(c));
-        }
+        add_text(obj, txt);
         return;
     }
 
@@ -380,11 +313,7 @@ void lv_textarea_set_text(lv_obj_t * obj, const char * txt)
         if(ta->pwd_mode) {
             ta->pwd_tmp[0] = '\0'; /*Clear the password too*/
         }
-        uint32_t i = 0;
-        while(txt[i] != '\0') {
-            uint32_t c = lv_text_encoded_next(txt, &i);
-            lv_textarea_add_char(obj, lv_text_unicode_to_encoded(c));
-        }
+        add_text(obj, txt);
     }
     else {
         lv_label_set_text(ta->label, txt);
@@ -405,8 +334,6 @@ void lv_textarea_set_text(lv_obj_t * obj, const char * txt)
 
         pwd_char_hider(obj);
     }
-
-    lv_obj_send_event(obj, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
 void lv_textarea_set_placeholder_text(lv_obj_t * obj, const char * txt)
@@ -441,17 +368,7 @@ void lv_textarea_set_placeholder_text(lv_obj_t * obj, const char * txt)
 void lv_textarea_set_cursor_pos(lv_obj_t * obj, int32_t pos)
 {
     LV_ASSERT_OBJ(obj, MY_CLASS);
-
-    lv_textarea_t * ta = (lv_textarea_t *)obj;
-    if((uint32_t)ta->cursor.pos == (uint32_t)pos) return;
-
-    uint32_t len = lv_text_get_encoded_length(lv_label_get_text(ta->label));
-
-    if(pos < 0) pos = len + pos;
-
-    if(pos > (int32_t)len || pos == LV_TEXTAREA_CURSOR_LAST) pos = len;
-
-    ta->cursor.pos = pos;
+    set_cursor_pos_internal(obj, pos);
 
     /*Position the label to make the cursor visible*/
     lv_obj_update_layout(obj);
@@ -558,8 +475,28 @@ void lv_textarea_set_accepted_chars(lv_obj_t * obj, const char * list)
 
     lv_textarea_t * ta = (lv_textarea_t *)obj;
 
-    ta->accepted_chars = list;
+    char * copied_list = NULL;
+    if(list) {
+        copied_list = lv_strdup(list);
+        LV_ASSERT_MALLOC(copied_list);
+    }
+
+    if(!ta->static_accepted_chars) lv_free(ta->accepted_chars);
+    ta->static_accepted_chars = 0;
+    ta->accepted_chars = copied_list;
 }
+
+void lv_textarea_set_accepted_chars_static(lv_obj_t * obj, const char * list)
+{
+    LV_ASSERT_OBJ(obj, MY_CLASS);
+
+    lv_textarea_t * ta = (lv_textarea_t *)obj;
+
+    if(!ta->static_accepted_chars) lv_free(ta->accepted_chars);
+    ta->static_accepted_chars = 1;
+    ta->accepted_chars = (char *)list;
+}
+
 
 void lv_textarea_set_max_length(lv_obj_t * obj, uint32_t num)
 {
@@ -892,6 +829,7 @@ static void lv_textarea_constructor(const lv_obj_class_t * class_p, lv_obj_t * o
     ta->pwd_bullet        = NULL;
     ta->pwd_show_time     = LV_TEXTAREA_DEF_PWD_SHOW_TIME;
     ta->accepted_chars    = NULL;
+    ta->static_accepted_chars = 1;
     ta->max_length        = 0;
     ta->cursor.show      = 1;
     /*It will be set to zero later (with zero value lv_textarea_set_cursor_pos(obj, 0); wouldn't do anything as there is no difference)*/
@@ -937,6 +875,8 @@ static void lv_textarea_destructor(const lv_obj_class_t * class_p, lv_obj_t * ob
         lv_free(ta->placeholder_txt);
         ta->placeholder_txt = NULL;
     }
+    if(!ta->static_accepted_chars) lv_free(ta->accepted_chars);
+    ta->accepted_chars = NULL;
 }
 
 static void lv_textarea_event(const lv_obj_class_t * class_p, lv_event_t * e)
@@ -988,7 +928,7 @@ static void lv_textarea_event(const lv_obj_class_t * class_p, lv_event_t * e)
     else if(code == LV_EVENT_DRAW_POST) {
         draw_cursor(e);
     }
-    else if(code == LV_EVENT_SIZE_CHANGED) {
+    else if(code == LV_EVENT_SIZE_CHANGED || code == LV_EVENT_STYLE_CHANGED) {
         lv_textarea_t * ta = (lv_textarea_t *)obj;
         lv_textarea_scroll_to_cusor_pos(obj, ta->cursor.pos);
     }
@@ -1474,6 +1414,7 @@ static void lv_textarea_scroll_to_cusor_pos(lv_obj_t * obj, int32_t pos)
     lv_textarea_t * ta = (lv_textarea_t *)obj;
 
     lv_point_t cur_pos;
+    lv_obj_update_layout(ta->label);
     const lv_font_t * font = lv_obj_get_style_text_font(obj, LV_PART_MAIN);
     lv_label_get_letter_pos(ta->label, pos, &cur_pos);
 
@@ -1508,6 +1449,119 @@ static void lv_textarea_scroll_to_cusor_pos(lv_obj_t * obj, int32_t pos)
     start_cursor_blink(obj);
 
     refr_cursor_area(obj);
+}
+
+static void set_cursor_pos_internal(lv_obj_t * obj, int32_t pos)
+{
+    lv_textarea_t * ta = (lv_textarea_t *)obj;
+    if((uint32_t)ta->cursor.pos == (uint32_t)pos) return;
+
+    uint32_t len = lv_text_get_encoded_length(lv_label_get_text(ta->label));
+
+    if(pos < 0) pos = len + pos;
+
+    if(pos > (int32_t)len || pos == LV_TEXTAREA_CURSOR_LAST) pos = len;
+
+    ta->cursor.pos = pos;
+}
+
+static void add_text(lv_obj_t * obj, const char * txt)
+{
+    lv_textarea_t * ta = (lv_textarea_t *)obj;
+    uint32_t i = 0;
+    bool text_changed = false;
+    while(txt[i] != '\0') {
+        uint32_t c = lv_text_encoded_next(txt, &i);
+        lv_result_t res = add_char(obj, lv_text_unicode_to_encoded(c));
+        if(res != LV_RESULT_OK) {
+            continue;
+        }
+        set_cursor_pos_internal(obj, ta->cursor.pos + 1);
+        text_changed = true;
+    }
+
+    if(!text_changed) {
+        return;
+    }
+
+    lv_obj_update_layout(obj);
+    lv_textarea_scroll_to_cusor_pos(obj, ta->cursor.pos);
+    refr_cursor_area(obj);
+    /*Move the cursor after the new character*/
+    lv_obj_send_event(obj, LV_EVENT_VALUE_CHANGED, NULL);
+
+}
+static lv_result_t add_char(lv_obj_t * obj, uint32_t c)
+{
+    LV_ASSERT_OBJ(obj, MY_CLASS);
+
+    lv_textarea_t * ta = (lv_textarea_t *)obj;
+
+    if(ta->one_line && (c == '\n' || c == '\r')) {
+        LV_LOG_INFO("Text area: line break ignored in one-line mode");
+        return LV_RESULT_INVALID;
+    }
+
+    uint32_t u32_buf[2];
+    u32_buf[0] = c;
+    u32_buf[1] = 0;
+
+    const char * letter_buf = (char *)&u32_buf;
+
+    uint32_t c2 = c;
+#if LV_BIG_ENDIAN_SYSTEM
+    if(c != 0) while(*letter_buf == 0) ++letter_buf;
+
+    /*The byte order may or may not need to be swapped here to get correct c_uni below,
+      since lv_textarea_add_text is ordering bytes correctly before calling lv_textarea_add_char.
+      Assume swapping is needed if MSB is zero. May not be foolproof. */
+    if((c != 0) && ((c & 0xff000000) == 0)) {
+        c2 = ((c >> 24) & 0xff) | /*move byte 3 to byte 0*/
+             ((c << 8) & 0xff0000) | /*move byte 1 to byte 2*/
+             ((c >> 8) & 0xff00) | /*move byte 2 to byte 1*/
+             ((c << 24) & 0xff000000); /*byte 0 to byte 3*/
+    }
+#endif
+
+    lv_result_t res = insert_handler(obj, letter_buf);
+    if(res != LV_RESULT_OK) return res;
+
+    uint32_t c_uni = lv_text_encoded_next((const char *)&c2, NULL);
+
+    if(char_is_accepted(obj, c_uni) == false) {
+        LV_LOG_INFO("Character is not accepted by the text area (too long text or not in the accepted list)");
+        return LV_RESULT_INVALID;
+    }
+
+    if(ta->pwd_mode) pwd_char_hider(obj); /*Make sure all the current text contains only '*'*/
+
+    /*If the textarea is empty, invalidate it to hide the placeholder*/
+    if(ta->placeholder_txt) {
+        const char * txt = lv_label_get_text(ta->label);
+        if(txt[0] == '\0') lv_obj_invalidate(obj);
+    }
+
+    /* Try to allocate memory for pwd mode first, if we fail we don't insert the character either*/
+    if(ta->pwd_mode) {
+        /*+2: the new char + \0*/
+        size_t realloc_size = lv_strlen(ta->pwd_tmp) + lv_strlen(letter_buf) + 1;
+        char * pwd_tmp = lv_realloc(ta->pwd_tmp, realloc_size);
+        LV_ASSERT_MALLOC(pwd_tmp);
+        if(!pwd_tmp) return LV_RESULT_INVALID;
+        ta->pwd_tmp = pwd_tmp;
+    }
+
+
+    lv_label_ins_text(ta->label, ta->cursor.pos, letter_buf); /*Insert the character*/
+    lv_textarea_clear_selection(obj); /*Clear selection*/
+
+    if(ta->pwd_mode) {
+        lv_text_ins(ta->pwd_tmp, ta->cursor.pos, (const char *)letter_buf);
+
+        /*Auto hide characters*/
+        auto_hide_characters(obj);
+    }
+    return LV_RESULT_OK;
 }
 
 #endif

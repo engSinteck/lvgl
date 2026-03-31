@@ -9,6 +9,11 @@
 
 #include "lv_draw_opengles.h"
 #if LV_USE_DRAW_OPENGLES
+
+#if LV_USE_DRAW_NANOVG
+    #error "LV_USE_DRAW_NANOVG and LV_USE_DRAW_OPENGLES cannot be enabled at the same time. Disable one of them in lv_conf.h or Kconfig."
+#endif
+
 #include "../lv_draw_private.h"
 #include "../../misc/cache/lv_cache_entry_private.h"
 #include "../../drivers/opengles/lv_opengles_debug.h"
@@ -156,6 +161,12 @@ static lv_cache_compare_res_t opengles_texture_cache_compare_cb(const cache_data
     }
     if(lhs->h != rhs->h) {
         return lhs->h > rhs->h ? 1 : -1;
+    }
+
+    if(lhs->draw_dsc == NULL || rhs->draw_dsc == NULL) {
+        if(lhs->draw_dsc == rhs->draw_dsc) return 0;
+        if(lhs->draw_dsc == NULL) return -1;
+        return 1;
     }
 
     uint32_t lhs_dsc_size = lhs->draw_dsc->dsc_size;
@@ -530,11 +541,26 @@ static void draw_from_cached_texture(lv_draw_task_t * t)
 
     lv_cache_release(u->texture_cache, entry_cached, u);
 
+    /*Do not cache modifiable images as they might change in the next frame
+     *resulting in stale textures in the cache. */
+    if(t->type == LV_DRAW_TASK_TYPE_IMAGE) {
+        lv_draw_image_dsc_t * img_dsc = (lv_draw_image_dsc_t *)t->draw_dsc;
+        if(img_dsc->header.flags & LV_IMAGE_FLAGS_MODIFIABLE) {
+            lv_cache_drop(u->texture_cache, &data_to_find, u);
+        }
+    }
     /*Do not cache non static (const) texts as the text's pointer can be freed/reallocated
      *at any time resulting in a wild pointer in the cached draw dsc. */
     if(t->type == LV_DRAW_TASK_TYPE_LABEL) {
         lv_draw_label_dsc_t * label_dsc = t->draw_dsc;
         if(!label_dsc->text_static) {
+            lv_cache_drop(u->texture_cache, &data_to_find, u);
+        }
+    }
+    /*Do not cache lines rendered from points at dsc->points will be freed*/
+    else if(t->type == LV_DRAW_TASK_TYPE_LINE) {
+        lv_draw_line_dsc_t * line_dsc = t->draw_dsc;
+        if(line_dsc->points) {
             lv_cache_drop(u->texture_cache, &data_to_find, u);
         }
     }
@@ -570,8 +596,9 @@ static void execute_drawing(lv_draw_opengles_unit_t * u)
                 float tex_h = (float)lv_area_get_height(&fill_area);
                 GL_CALL(glEnable(GL_SCISSOR_TEST));
                 GL_CALL(glScissor(fill_area.x1, targ_tex_h - fill_area.y1 - tex_h, tex_w, tex_h));
-                GL_CALL(glClearColor((float)fill_dsc->color.red / 255.0f, (float)fill_dsc->color.green / 255.0f,
-                                     (float)fill_dsc->color.blue / 255.0f, 1.0f));
+                /* swap red and blue channels here as they will be swapped back during flushing*/
+                GL_CALL(glClearColor((float)fill_dsc->color.blue / 255.0f, (float)fill_dsc->color.green / 255.0f,
+                                     (float)fill_dsc->color.red / 255.0f, 1.0f));
                 GL_CALL(glClearDepthf(1.0f));
                 GL_CALL(glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT));
                 GL_CALL(glDisable(GL_SCISSOR_TEST));
@@ -671,8 +698,18 @@ static void lv_draw_opengles_3d(lv_draw_task_t * t, const lv_draw_3d_dsc_t * dsc
     lv_area_t clip_area = t->clip_area;
     lv_area_move(&clip_area, -dest_layer->buf_area.x1, -dest_layer->buf_area.y1);
 
-    lv_opengles_render(dsc->tex_id, coords, dsc->opa, targ_tex_w, targ_tex_h, &clip_area, dsc->h_flip, !dsc->v_flip,
-                       lv_color_black(), true, false);
+    lv_opengles_render_params_t params;
+    lv_opengles_render_params_init(&params);
+    params.texture = dsc->tex_id;
+    params.texture_area = coords;
+    params.opa = dsc->opa;
+    params.disp_w = targ_tex_w;
+    params.disp_h = targ_tex_h;
+    params.texture_clip_area = &clip_area;
+    params.h_flip = dsc->h_flip;
+    params.v_flip = dsc->v_flip;
+    params.blend_opt = true;
+    lv_opengles_render(&params);
 
     if(target_texture) {
         GL_CALL(glBindFramebuffer(GL_FRAMEBUFFER, 0));

@@ -1,4 +1,4 @@
-# Kconfig file for LVGL v9.4.0
+# Kconfig file for LVGL v9.5.0
 
 menu "LVGL configuration"
 
@@ -162,6 +162,15 @@ menu "LVGL configuration"
 			Unblocking an RTOS task with a direct notification is 45% faster and uses less RAM
 			than unblocking a task using an intermediary object such as a binary semaphore.
 			RTOS task notifications can only be used when there is only one task that can be the recipient of the event.
+		config LV_OS_IDLE_PERCENT_CUSTOM
+			bool "Custom idle percentage calculation"
+			default n
+			depends on LV_OS_FREERTOS
+			help
+				Enable this to provide a custom implementation of lv_os_get_idle_percent.
+				This is useful for multi-core systems where the default
+				FreeRTOS implementation might not sufficiently track idle time across all cores.
+
 	endmenu
 
 	menu "Rendering Configuration"
@@ -363,6 +372,8 @@ menu "LVGL configuration"
 				bool "1: NEON"
 			config LV_DRAW_SW_ASM_HELIUM
 				bool "2: HELIUM"
+			config LV_DRAW_SW_ASM_RISCV_V
+				bool "3: RISC-V Vector"
 			config LV_DRAW_SW_ASM_CUSTOM
 				bool "255: CUSTOM"
 		endchoice
@@ -372,6 +383,7 @@ menu "LVGL configuration"
 			default 0 if LV_DRAW_SW_ASM_NONE
 			default 1 if LV_DRAW_SW_ASM_NEON
 			default 2 if LV_DRAW_SW_ASM_HELIUM
+			default 3 if LV_DRAW_SW_ASM_RISCV_V
 			default 255 if LV_DRAW_SW_ASM_CUSTOM
 
 		config LV_DRAW_SW_ASM_CUSTOM_INCLUDE
@@ -405,16 +417,11 @@ menu "LVGL configuration"
 		config LV_USE_G2D
 			bool "Use NXP's G2D on MPU platforms"
 			default n
-		
+
 		config LV_USE_DRAW_G2D
 			bool "Use G2D for drawing."
 			depends on LV_USE_G2D
 			default y
-		
-		config LV_USE_ROTATE_G2D
-			bool "Use G2D to rotate display."
-			depends on LV_USE_G2D
-			default n
 
 		config LV_G2D_HASH_TABLE_SIZE
 			bool "Maximum number of buffers that can be stored for G2D draw unit."
@@ -552,6 +559,13 @@ menu "LVGL configuration"
 		bool "Use Espressif's PPA accelerator for Image draw"
 		default n
 		depends on LV_USE_PPA
+
+		config LV_PPA_BURST_LENGTH
+		int "PPA Burst length in bytes"
+		depends on LV_USE_PPA
+		default 128
+		help
+			PPA burst length size in bytes.
 
 		config LV_USE_DRAW_EVE
 			bool "Use EVE FT81X GPU."
@@ -1502,7 +1516,7 @@ menu "LVGL configuration"
 
 		config LV_USE_LIBJPEG_TURBO
 			bool "libjpeg-turbo decoder library"
-		
+
 		config LV_USE_LIBWEBP
 			bool "WebP decoder library"
 
@@ -1824,8 +1838,6 @@ menu "LVGL configuration"
 			depends on LV_USE_TEST
 		config LV_USE_TRANSLATION
 			bool "Enable text translation support"
-		config LV_USE_XML
-			bool "Enable loading XML UIs runtime"
 		config LV_USE_COLOR_FILTER
 			bool "Enable color filter style"
 			default n
@@ -1834,7 +1846,7 @@ menu "LVGL configuration"
 			default 9 # LVGL_VERSION_MAJOR
 		config LVGL_VERSION_MINOR
 			int
-			default 5 # LVGL_VERSION_MINOR
+			default 6 # LVGL_VERSION_MINOR
 		config LVGL_VERSION_PATCH
 			int
 			default 0 # LVGL_VERSION_PATCH
@@ -2223,6 +2235,7 @@ menu "LVGL configuration"
 
 		config LV_USE_OPENGLES
 			bool "Use GLFW and OpenGL to open window on PC and handle mouse and keyboard"
+			depends on LV_USE_MATRIX
 			default n
 
 		config LV_USE_OPENGLES_DEBUG
